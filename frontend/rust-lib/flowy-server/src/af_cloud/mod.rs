@@ -1,5 +1,5 @@
 pub use server::*;
 
-pub mod configuration;
+pub mod define;
 pub mod impls;
 mod server;

@@ -1,4 +1,4 @@
-import 'package:appflowy/plugins/database_view/widgets/database_view_widget.dart';
+import 'package:appflowy/plugins/database/widgets/database_view_widget.dart';
 import 'package:appflowy/plugins/document/presentation/editor_plugins/base/built_in_page_widget.dart';
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter/material.dart';
@@ -17,11 +17,8 @@ class DatabaseBlockKeys {
 
 class DatabaseViewBlockComponentBuilder extends BlockComponentBuilder {
   DatabaseViewBlockComponentBuilder({
-    this.configuration = const BlockComponentConfiguration(),
+    super.configuration,
   });
-
-  @override
-  final BlockComponentConfiguration configuration;
 
   @override
   BlockComponentWidget build(BlockComponentContext blockComponentContext) {
@@ -39,7 +36,7 @@ class DatabaseViewBlockComponentBuilder extends BlockComponentBuilder {
   }
 
   @override
-  bool validate(Node node) =>
+  BlockComponentValidate get validate => (node) =>
       node.children.isEmpty &&
       node.attributes[DatabaseBlockKeys.parentID] is String &&
       node.attributes[DatabaseBlockKeys.viewID] is String;
@@ -74,18 +71,20 @@ class _DatabaseBlockComponentWidgetState
     Widget child = BuiltInPageWidget(
       node: widget.node,
       editorState: editorState,
-      builder: (viewPB) {
-        return DatabaseViewWidget(
-          key: ValueKey(viewPB.id),
-          view: viewPB,
-          shrinkWrap: true,
-        );
-      },
+      builder: (view) => DatabaseViewWidget(key: ValueKey(view.id), view: view),
     );
 
     child = Padding(
       padding: padding,
-      child: child,
+      child: FocusScope(
+        skipTraversal: true,
+        onFocusChange: (value) {
+          if (value && keepEditorFocusNotifier.value == 0) {
+            context.read<EditorState>().selection = null;
+          }
+        },
+        child: child,
+      ),
     );
 
     if (widget.showActions && widget.actionBuilder != null) {

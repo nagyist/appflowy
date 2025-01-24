@@ -1,18 +1,20 @@
-import 'package:flowy_infra_ui/style_widget/scrolling/styled_list.dart';
-import 'package:flowy_infra/size.dart';
-import 'package:flowy_infra_ui/widget/dialog/dialog_size.dart';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:ui';
+
+import 'package:flowy_infra/size.dart';
+import 'package:flowy_infra_ui/style_widget/scrolling/styled_list.dart';
+import 'package:flowy_infra_ui/widget/dialog/dialog_size.dart';
 
 extension IntoDialog on Widget {
   Future<dynamic> show(BuildContext context) async {
     FocusNode dialogFocusNode = FocusNode();
     await Dialogs.show(
-      child: RawKeyboardListener(
+      child: KeyboardListener(
         focusNode: dialogFocusNode,
-        onKey: (value) {
-          if (value.isKeyPressed(LogicalKeyboardKey.escape)) {
+        onKeyEvent: (event) {
+          if (event.logicalKey == LogicalKeyboardKey.escape) {
             Navigator.of(context).pop();
           }
         },
@@ -35,7 +37,7 @@ class StyledDialog extends StatelessWidget {
   final bool shrinkWrap;
 
   const StyledDialog({
-    Key? key,
+    super.key,
     required this.child,
     this.maxWidth,
     this.maxHeight,
@@ -44,7 +46,7 @@ class StyledDialog extends StatelessWidget {
     this.bgColor,
     this.borderRadius = const BorderRadius.all(Radius.circular(6)),
     this.shrinkWrap = true,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -56,22 +58,24 @@ class StyledDialog extends StatelessWidget {
     );
 
     if (shrinkWrap) {
-      innerContent =
-          IntrinsicWidth(child: IntrinsicHeight(child: innerContent));
+      innerContent = IntrinsicWidth(
+          child: IntrinsicHeight(
+        child: innerContent,
+      ));
     }
 
     return FocusTraversalGroup(
       child: Container(
         margin: margin ?? EdgeInsets.all(Insets.sm * 2),
         alignment: Alignment.center,
-        child: Container(
+        child: ConstrainedBox(
           constraints: BoxConstraints(
             minWidth: DialogSize.minDialogWidth,
             maxHeight: maxHeight ?? double.infinity,
             maxWidth: maxWidth ?? double.infinity,
           ),
           child: ClipRRect(
-            borderRadius: borderRadius,
+            borderRadius: borderRadius ?? BorderRadius.zero,
             child: SingleChildScrollView(
               physics: StyledScrollPhysics(),
               //https://medium.com/saugo360/https-medium-com-saugo360-flutter-using-overlay-to-display-floating-widgets-2e6d0e8decb9
@@ -106,13 +110,14 @@ class DialogBarrier {
   String label;
   Color color;
   bool dismissible;
-  ImageFilter filter;
+  ImageFilter? filter;
 
   DialogBarrier({
     this.dismissible = true,
     this.color = Colors.transparent,
     this.label = '',
-  }) : filter = ImageFilter.blur(sigmaX: 4, sigmaY: 4);
+    this.filter,
+  });
 }
 
 class StyledDialogRoute<T> extends PopupRoute<T> {
@@ -124,11 +129,11 @@ class StyledDialogRoute<T> extends PopupRoute<T> {
     required this.barrier,
     Duration transitionDuration = const Duration(milliseconds: 300),
     RouteTransitionsBuilder? transitionBuilder,
-    RouteSettings? settings,
+    super.settings,
   })  : _pageBuilder = pageBuilder,
         _transitionDuration = transitionDuration,
         _transitionBuilder = transitionBuilder,
-        super(settings: settings, filter: barrier.filter);
+        super(filter: barrier.filter);
 
   @override
   bool get barrierDismissible {

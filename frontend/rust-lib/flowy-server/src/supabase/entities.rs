@@ -1,6 +1,7 @@
 use std::fmt;
 use std::fmt::Display;
 
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
@@ -27,10 +28,9 @@ pub(crate) struct UserProfileResponse {
 
   #[serde(deserialize_with = "deserialize_null_or_default")]
   pub encryption_sign: String,
-}
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct UserProfileResponseList(pub Vec<UserProfileResponse>);
+  pub updated_at: DateTime<Utc>,
+}
 
 #[derive(Deserialize, Clone)]
 pub(crate) struct UidResponse {

@@ -13,6 +13,8 @@ pub(crate) enum UserNotification {
   DidUpdateUserProfile = 2,
   DidUpdateUserWorkspaces = 3,
   DidUpdateCloudConfig = 4,
+  DidUpdateUserWorkspace = 5,
+  DidUpdateAISetting = 6,
 }
 
 impl std::convert::From<UserNotification> for i32 {
@@ -21,15 +23,18 @@ impl std::convert::From<UserNotification> for i32 {
   }
 }
 
+#[tracing::instrument(level = "trace")]
 pub(crate) fn send_notification(id: &str, ty: UserNotification) -> NotificationBuilder {
   NotificationBuilder::new(id, ty, USER_OBSERVABLE_SOURCE)
 }
 
-pub(crate) fn send_auth_state_notification(payload: AuthStateChangedPB) -> NotificationBuilder {
+#[tracing::instrument(level = "trace")]
+pub(crate) fn send_auth_state_notification(payload: AuthStateChangedPB) {
   NotificationBuilder::new(
     "auth_state_change_notification",
     UserNotification::UserAuthStateChanged,
     USER_OBSERVABLE_SOURCE,
   )
   .payload(payload)
+  .send()
 }

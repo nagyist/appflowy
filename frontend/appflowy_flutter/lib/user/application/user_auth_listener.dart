@@ -1,26 +1,27 @@
 import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:appflowy/core/notification/user_notification.dart';
 import 'package:appflowy_backend/log.dart';
-import 'package:appflowy_backend/protobuf/flowy-user/auth.pb.dart';
-import 'package:dartz/dartz.dart';
 import 'package:appflowy_backend/protobuf/flowy-error/errors.pb.dart';
-import 'dart:typed_data';
 import 'package:appflowy_backend/protobuf/flowy-notification/protobuf.dart';
+import 'package:appflowy_backend/protobuf/flowy-user/auth.pb.dart';
 import 'package:appflowy_backend/protobuf/flowy-user/notification.pb.dart'
     as user;
 import 'package:appflowy_backend/rust_stream.dart';
+import 'package:appflowy_result/appflowy_result.dart';
 
 class UserAuthStateListener {
-  void Function(String)? _onForceLogout;
+  void Function(String)? _onInvalidAuth;
   void Function()? _didSignIn;
   StreamSubscription<SubscribeObject>? _subscription;
   UserNotificationParser? _userParser;
 
   void start({
-    void Function(String)? onForceLogout,
+    void Function(String)? onInvalidAuth,
     void Function()? didSignIn,
   }) {
-    _onForceLogout = onForceLogout;
+    _onInvalidAuth = onInvalidAuth;
     _didSignIn = didSignIn;
 
     _userParser = UserNotificationParser(
@@ -35,12 +36,12 @@ class UserAuthStateListener {
   Future<void> stop() async {
     _userParser = null;
     await _subscription?.cancel();
-    _onForceLogout = null;
+    _onInvalidAuth = null;
   }
 
   void _userNotificationCallback(
     user.UserNotification ty,
-    Either<Uint8List, FlowyError> result,
+    FlowyResult<Uint8List, FlowyError> result,
   ) {
     switch (ty) {
       case user.UserNotification.UserAuthStateChanged:
@@ -51,8 +52,8 @@ class UserAuthStateListener {
               case AuthStatePB.AuthStateSignIn:
                 _didSignIn?.call();
                 break;
-              case AuthStatePB.AuthStateForceSignOut:
-                _onForceLogout?.call("");
+              case AuthStatePB.InvalidAuth:
+                _onInvalidAuth?.call(pb.message);
                 break;
               default:
                 break;

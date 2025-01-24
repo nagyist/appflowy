@@ -1,43 +1,66 @@
 #![allow(clippy::upper_case_acronyms)]
 
+use collab_database::fields::date_type_option::{
+  DateCellData, DateFormat, DateTypeOption, TimeFormat,
+};
 use strum_macros::EnumIter;
 
 use flowy_derive::{ProtoBuf, ProtoBuf_Enum};
 
-use crate::entities::{CellIdPB, FieldType};
-use crate::services::field::{DateFormat, DateTypeOption, TimeFormat};
+use crate::entities::CellIdPB;
 
 #[derive(Clone, Debug, Default, ProtoBuf)]
 pub struct DateCellDataPB {
-  #[pb(index = 1)]
-  pub date: String,
+  #[pb(index = 1, one_of)]
+  pub timestamp: Option<i64>,
 
-  #[pb(index = 2)]
-  pub time: String,
+  #[pb(index = 2, one_of)]
+  pub end_timestamp: Option<i64>,
 
   #[pb(index = 3)]
-  pub timestamp: i64,
+  pub include_time: bool,
 
   #[pb(index = 4)]
-  pub include_time: bool,
+  pub is_range: bool,
+
+  #[pb(index = 5)]
+  pub reminder_id: String,
+}
+
+impl From<&DateCellDataPB> for DateCellData {
+  fn from(data: &DateCellDataPB) -> Self {
+    Self {
+      timestamp: data.timestamp,
+      end_timestamp: data.end_timestamp,
+      include_time: data.include_time,
+      is_range: data.is_range,
+      reminder_id: data.reminder_id.to_owned(),
+    }
+  }
 }
 
 #[derive(Clone, Debug, Default, ProtoBuf)]
-pub struct DateChangesetPB {
+pub struct DateCellChangesetPB {
   #[pb(index = 1)]
   pub cell_id: CellIdPB,
 
   #[pb(index = 2, one_of)]
-  pub date: Option<i64>,
+  pub timestamp: Option<i64>,
 
   #[pb(index = 3, one_of)]
-  pub time: Option<String>,
+  pub end_timestamp: Option<i64>,
 
   #[pb(index = 4, one_of)]
   pub include_time: Option<bool>,
 
   #[pb(index = 5, one_of)]
+  pub is_range: Option<bool>,
+
+  #[pb(index = 6, one_of)]
   pub clear_flag: Option<bool>,
+
+  #[pb(index = 7, one_of)]
+  pub reminder_id: Option<String>,
 }
 
 // Date
@@ -51,9 +74,6 @@ pub struct DateTypeOptionPB {
 
   #[pb(index = 3)]
   pub timezone_id: String,
-
-  #[pb(index = 4)]
-  pub field_type: FieldType,
 }
 
 impl From<DateTypeOption> for DateTypeOptionPB {
@@ -62,7 +82,6 @@ impl From<DateTypeOption> for DateTypeOptionPB {
       date_format: data.date_format.into(),
       time_format: data.time_format.into(),
       timezone_id: data.timezone_id,
-      field_type: data.field_type,
     }
   }
 }
@@ -73,12 +92,11 @@ impl From<DateTypeOptionPB> for DateTypeOption {
       date_format: data.date_format.into(),
       time_format: data.time_format.into(),
       timezone_id: data.timezone_id,
-      field_type: data.field_type,
     }
   }
 }
 
-#[derive(Clone, Debug, Copy, EnumIter, ProtoBuf_Enum, Default)]
+#[derive(Clone, Debug, Copy, ProtoBuf_Enum, Default)]
 pub enum DateFormatPB {
   Local = 0,
   US = 1,
@@ -86,6 +104,7 @@ pub enum DateFormatPB {
   #[default]
   Friendly = 3,
   DayMonthYear = 4,
+  FriendlyFull = 5,
 }
 
 impl From<DateFormatPB> for DateFormat {
@@ -96,6 +115,7 @@ impl From<DateFormatPB> for DateFormat {
       DateFormatPB::ISO => DateFormat::ISO,
       DateFormatPB::Friendly => DateFormat::Friendly,
       DateFormatPB::DayMonthYear => DateFormat::DayMonthYear,
+      DateFormatPB::FriendlyFull => DateFormat::FriendlyFull,
     }
   }
 }
@@ -108,6 +128,7 @@ impl From<DateFormat> for DateFormatPB {
       DateFormat::ISO => DateFormatPB::ISO,
       DateFormat::Friendly => DateFormatPB::Friendly,
       DateFormat::DayMonthYear => DateFormatPB::DayMonthYear,
+      DateFormat::FriendlyFull => DateFormatPB::FriendlyFull,
     }
   }
 }

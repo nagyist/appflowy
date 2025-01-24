@@ -1,14 +1,28 @@
-import 'package:appflowy/plugins/document/application/doc_bloc.dart';
-import 'package:appflowy/plugins/document/presentation/editor_plugins/inline_page/inline_page_reference.dart';
+import 'dart:ui' as ui;
+
+import 'package:appflowy/plugins/document/application/document_bloc.dart';
+import 'package:appflowy/plugins/document/presentation/editor_configuration.dart';
+import 'package:appflowy/plugins/document/presentation/editor_plugins/background_color/theme_background_color.dart';
+import 'package:appflowy/plugins/document/presentation/editor_plugins/i18n/editor_i18n.dart';
 import 'package:appflowy/plugins/document/presentation/editor_plugins/plugins.dart';
 import 'package:appflowy/plugins/document/presentation/editor_style.dart';
+import 'package:appflowy/plugins/inline_actions/handlers/child_page.dart';
+import 'package:appflowy/plugins/inline_actions/handlers/date_reference.dart';
+import 'package:appflowy/plugins/inline_actions/handlers/inline_page_reference.dart';
+import 'package:appflowy/plugins/inline_actions/handlers/reminder_reference.dart';
+import 'package:appflowy/plugins/inline_actions/inline_actions_service.dart';
+import 'package:appflowy/shared/feature_flags.dart';
+import 'package:appflowy/workspace/application/settings/appearance/appearance_cubit.dart';
 import 'package:appflowy/workspace/application/settings/shortcuts/settings_shortcuts_service.dart';
+import 'package:appflowy/workspace/application/view_info/view_info_bloc.dart';
+import 'package:appflowy/workspace/presentation/home/af_focus_manager.dart';
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:collection/collection.dart';
 import 'package:flowy_infra/theme_extension.dart';
-import 'package:flowy_infra_ui/flowy_infra_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:universal_platform/universal_platform.dart';
 
 /// Wrapper for the appflowy editor.
 class AppFlowyEditorPage extends StatefulWidget {
@@ -20,6 +34,10 @@ class AppFlowyEditorPage extends StatefulWidget {
     this.scrollController,
     this.autoFocus,
     required this.styleCustomizer,
+    this.showParagraphPlaceholder,
+    this.placeholderText,
+    this.initialSelection,
+    this.useViewInfoBloc = true,
   });
 
   final Widget? header;
@@ -28,42 +46,44 @@ class AppFlowyEditorPage extends StatefulWidget {
   final bool shrinkWrap;
   final bool? autoFocus;
   final EditorStyleCustomizer styleCustomizer;
+  final ShowPlaceholder? showParagraphPlaceholder;
+  final String Function(Node)? placeholderText;
+
+  /// Used to provide an initial selection on Page-load
+  final Selection? initialSelection;
+
+  final bool useViewInfoBloc;
 
   @override
   State<AppFlowyEditorPage> createState() => _AppFlowyEditorPageState();
 }
 
-final List<CommandShortcutEvent> commandShortcutEvents = [
-  ...codeBlockCommands,
-  ...standardCommandShortcutEvents,
-];
-
-final List<CommandShortcutEvent> defaultCommandShortcutEvents = [
-  ...commandShortcutEvents.map((e) => e.copyWith()).toList(),
-];
-
-class _AppFlowyEditorPageState extends State<AppFlowyEditorPage> {
+class _AppFlowyEditorPageState extends State<AppFlowyEditorPage>
+    with WidgetsBindingObserver {
   late final ScrollController effectiveScrollController;
 
-  final inlinePageReferenceService = InlinePageReferenceService();
+  late final InlineActionsService inlineActionsService = InlineActionsService(
+    context: context,
+    handlers: [
+      if (FeatureFlag.inlineSubPageMention.isOn)
+        InlineChildPageService(currentViewId: documentBloc.documentId),
+      InlinePageReferenceService(currentViewId: documentBloc.documentId),
+      DateReferenceService(context),
+      ReminderReferenceService(context),
+    ],
+  );
 
-  final List<CommandShortcutEvent> commandShortcutEvents = [
-    toggleToggleListCommand,
-    ...codeBlockCommands,
-    customCopyCommand,
-    customPasteCommand,
-    customCutCommand,
-    ...standardCommandShortcutEvents,
+  late final List<CommandShortcutEvent> commandShortcuts = [
+    ...commandShortcutEvents,
+    ..._buildFindAndReplaceCommands(),
   ];
 
   final List<ToolbarItem> toolbarItems = [
-    smartEditItem..isActive = onlyShowInSingleTextTypeSelectionAndExcludeTable,
+    askAIItem..isActive = onlyShowInTextType,
     paragraphItem..isActive = onlyShowInSingleTextTypeSelectionAndExcludeTable,
-    ...(headingItems
-      ..forEach(
-        (e) => e.isActive = onlyShowInSingleSelectionAndTextType,
-      )),
-    ...markdownFormatItems,
+    headingsToolbarItem
+      ..isActive = onlyShowInSingleTextTypeSelectionAndExcludeTable,
+    ...markdownFormatItems..forEach((e) => e.isActive = showInAnyTextType),
     quoteItem..isActive = onlyShowInSingleTextTypeSelectionAndExcludeTable,
     bulletedListItem
       ..isActive = onlyShowInSingleTextTypeSelectionAndExcludeTable,
@@ -72,75 +92,209 @@ class _AppFlowyEditorPageState extends State<AppFlowyEditorPage> {
     inlineMathEquationItem,
     linkItem,
     alignToolbarItem,
-    buildTextColorItem(),
-    buildHighlightColorItem(),
+    buildTextColorItem()..isActive = showInAnyTextType,
+    buildHighlightColorItem()..isActive = showInAnyTextType,
+    customizeFontToolbarItem..isActive = showInAnyTextType,
   ];
 
-  late final List<SelectionMenuItem> slashMenuItems;
-
-  late final Map<String, BlockComponentBuilder> blockComponentBuilders =
-      _customAppFlowyBlockComponentBuilders();
-
-  List<CharacterShortcutEvent> get characterShortcutEvents => [
-        // inline page reference list
-        ...inlinePageReferenceShortcuts,
-
-        // code block
-        ...codeBlockCharacterEvents,
-
-        // toggle list
-        formatGreaterToToggleList,
-        insertChildNodeInsideToggleList,
-
-        // customize the slash menu command
-        customSlashCommand(
-          slashMenuItems,
-          style: styleCustomizer.selectionMenuStyleBuilder(),
-        ),
-
-        ...standardCharacterShortcutEvents
-          ..removeWhere(
-            (element) => element == slashCommand,
-          ), // remove the default slash command.
-      ];
-
-  late final inlinePageReferenceShortcuts = [
-    inlinePageReferenceService.customPageLinkMenu(
-      character: '@',
-      style: styleCustomizer.selectionMenuStyleBuilder(),
-    ),
-    // uncomment this to enable the inline page reference list
-    // inlinePageReferenceService.customPageLinkMenu(
-    //   character: '+',
-    //   style: styleCustomizer.selectionMenuStyleBuilder(),
-    // ),
-  ];
-
-  late final showSlashMenu = customSlashCommand(
-    slashMenuItems,
-    shouldInsertSlash: false,
-    style: styleCustomizer.selectionMenuStyleBuilder(),
-  ).handler;
+  List<CharacterShortcutEvent> get characterShortcutEvents {
+    return buildCharacterShortcutEvents(
+      context,
+      documentBloc,
+      styleCustomizer,
+      inlineActionsService,
+      (editorState, node) => _customSlashMenuItems(
+        editorState: editorState,
+        node: node,
+      ),
+    );
+  }
 
   EditorStyleCustomizer get styleCustomizer => widget.styleCustomizer;
   DocumentBloc get documentBloc => context.read<DocumentBloc>();
 
+  late final EditorScrollController editorScrollController;
+
+  late final ViewInfoBloc viewInfoBloc = context.read<ViewInfoBloc>();
+
+  final editorKeyboardInterceptor = EditorKeyboardInterceptor();
+
+  Future<bool> showSlashMenu(editorState) async => customSlashCommand(
+        _customSlashMenuItems(),
+        shouldInsertSlash: false,
+        style: styleCustomizer.selectionMenuStyleBuilder(),
+        supportSlashMenuNodeTypes: supportSlashMenuNodeTypes,
+      ).handler(editorState);
+
+  AFFocusManager? focusManager;
+
+  AppLifecycleState? lifecycleState = WidgetsBinding.instance.lifecycleState;
+  List<Selection?> previousSelections = [];
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
+    if (widget.useViewInfoBloc) {
+      viewInfoBloc.add(
+        ViewInfoEvent.registerEditorState(editorState: widget.editorState),
+      );
+    }
+
+    _initEditorL10n();
     _initializeShortcuts();
+
+    AppFlowyRichTextKeys.partialSliced.addAll([
+      MentionBlockKeys.mention,
+      InlineMathEquationKeys.formula,
+    ]);
+
     indentableBlockTypes.add(ToggleListBlockKeys.type);
     convertibleBlockTypes.add(ToggleListBlockKeys.type);
-    slashMenuItems = _customSlashMenuItems();
+
     effectiveScrollController = widget.scrollController ?? ScrollController();
+    // disable the color parse in the HTML decoder.
+    DocumentHTMLDecoder.enableColorParse = false;
+
+    editorScrollController = EditorScrollController(
+      editorState: widget.editorState,
+      shrinkWrap: widget.shrinkWrap,
+      scrollController: effectiveScrollController,
+    );
+
+    toolbarItemWhiteList.addAll([
+      ToggleListBlockKeys.type,
+      CalloutBlockKeys.type,
+      TableBlockKeys.type,
+      SimpleTableBlockKeys.type,
+      SimpleTableCellBlockKeys.type,
+      SimpleTableRowBlockKeys.type,
+    ]);
+    AppFlowyRichTextKeys.supportSliced.add(AppFlowyRichTextKeys.fontFamily);
+
+    // customize the dynamic theme color
+    _customizeBlockComponentBackgroundColorDecorator();
+
+    widget.editorState.selectionNotifier.addListener(onSelectionChanged);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      focusManager = AFFocusManager.maybeOf(context);
+      focusManager?.loseFocusNotifier.addListener(_loseFocus);
+
+      _scrollToSelectionIfNeeded();
+
+      widget.editorState.service.keyboardService?.registerInterceptor(
+        editorKeyboardInterceptor,
+      );
+    });
+  }
+
+  void _scrollToSelectionIfNeeded() {
+    final initialSelection = widget.initialSelection;
+    final path = initialSelection?.start.path;
+    if (path == null) {
+      return;
+    }
+
+    // on desktop, using jumpTo to scroll to the selection.
+    // on mobile, using scrollTo to scroll to the selection, because using jumpTo will break the scroll notification metrics.
+    if (UniversalPlatform.isDesktop) {
+      editorScrollController.itemScrollController.jumpTo(
+        index: path.first,
+        alignment: 0.5,
+      );
+      widget.editorState.updateSelectionWithReason(
+        initialSelection,
+      );
+    } else {
+      const delayDuration = Duration(milliseconds: 250);
+      const animationDuration = Duration(milliseconds: 400);
+      Future.delayed(delayDuration, () {
+        editorScrollController.itemScrollController.scrollTo(
+          index: path.first,
+          duration: animationDuration,
+          curve: Curves.easeInOut,
+        );
+        widget.editorState.updateSelectionWithReason(
+          initialSelection,
+          extraInfo: {
+            selectionExtraInfoDoNotAttachTextService: true,
+            selectionExtraInfoDisableMobileToolbarKey: true,
+          },
+        );
+      }).then((_) {
+        Future.delayed(animationDuration, () {
+          widget.editorState.selectionType = SelectionType.inline;
+          widget.editorState.selectionExtraInfo = null;
+        });
+      });
+    }
+  }
+
+  void onSelectionChanged() {
+    if (widget.editorState.isDisposed) {
+      return;
+    }
+
+    previousSelections.add(widget.editorState.selection);
+
+    if (previousSelections.length > 2) {
+      previousSelections.removeAt(0);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    lifecycleState = state;
+
+    if (widget.editorState.isDisposed) {
+      return;
+    }
+
+    if (previousSelections.length == 2 &&
+        state == AppLifecycleState.resumed &&
+        widget.editorState.selection == null) {
+      widget.editorState.selection = previousSelections.first;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    final currFocusManager = AFFocusManager.maybeOf(context);
+    if (focusManager != currFocusManager) {
+      focusManager?.loseFocusNotifier.removeListener(_loseFocus);
+      focusManager = currFocusManager;
+      focusManager?.loseFocusNotifier.addListener(_loseFocus);
+    }
+
+    super.didChangeDependencies();
   }
 
   @override
   void dispose() {
+    widget.editorState.selectionNotifier.removeListener(onSelectionChanged);
+    widget.editorState.service.keyboardService?.unregisterInterceptor(
+      editorKeyboardInterceptor,
+    );
+    focusManager?.loseFocusNotifier.removeListener(_loseFocus);
+
+    if (widget.useViewInfoBloc && !viewInfoBloc.isClosed) {
+      viewInfoBloc.add(const ViewInfoEvent.unregisterEditorState());
+    }
+
+    SystemChannels.textInput.invokeMethod('TextInput.hide');
+
     if (widget.scrollController == null) {
       effectiveScrollController.dispose();
     }
+    inlineActionsService.dispose();
+    editorScrollController.dispose();
 
     super.dispose();
   }
@@ -150,306 +304,267 @@ class _AppFlowyEditorPageState extends State<AppFlowyEditorPage> {
     final (bool autoFocus, Selection? selection) =
         _computeAutoFocusParameters();
 
-    final editor = AppFlowyEditor(
-      editorState: widget.editorState,
-      editable: true,
-      shrinkWrap: widget.shrinkWrap,
-      scrollController: effectiveScrollController,
-      // setup the auto focus parameters
-      autoFocus: widget.autoFocus ?? autoFocus,
-      focusedSelection: selection,
-      // setup the theme
-      editorStyle: styleCustomizer.style(),
-      // customize the block builder
-      blockComponentBuilders: blockComponentBuilders,
-      // customize the shortcuts
-      characterShortcutEvents: characterShortcutEvents,
-      commandShortcutEvents: commandShortcutEvents,
-      contextMenuItems: customContextMenuItems,
-      header: widget.header,
-      footer: const VSpace(200),
+    final isRTL =
+        context.read<AppearanceSettingsCubit>().state.layoutDirection ==
+            LayoutDirection.rtlLayout;
+    final textDirection = isRTL ? ui.TextDirection.rtl : ui.TextDirection.ltr;
+
+    _setRTLToolbarItems(
+      context.read<AppearanceSettingsCubit>().state.enableRtlToolbarItems,
     );
 
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(
-          maxWidth: double.infinity,
-          maxHeight: double.infinity,
-        ),
-        child: FloatingToolbar(
-          style: styleCustomizer.floatingToolbarStyleBuilder(),
-          items: toolbarItems,
+    final isViewDeleted = context.read<DocumentBloc>().state.isDeleted;
+    final editor = Directionality(
+      textDirection: textDirection,
+      child: AppFlowyEditor(
+        editorState: widget.editorState,
+        editable: !isViewDeleted,
+        editorScrollController: editorScrollController,
+        // setup the auto focus parameters
+        autoFocus: widget.autoFocus ?? autoFocus,
+        focusedSelection: selection,
+        // setup the theme
+        editorStyle: styleCustomizer.style(),
+        // customize the block builders
+        blockComponentBuilders: buildBlockComponentBuilders(
+          slashMenuItemsBuilder: (editorState, node) => _customSlashMenuItems(
+            editorState: editorState,
+            node: node,
+          ),
+          context: context,
           editorState: widget.editorState,
-          scrollController: effectiveScrollController,
+          styleCustomizer: widget.styleCustomizer,
+          showParagraphPlaceholder: widget.showParagraphPlaceholder,
+          placeholderText: widget.placeholderText,
+        ),
+        // customize the shortcuts
+        characterShortcutEvents: characterShortcutEvents,
+        commandShortcutEvents: commandShortcuts,
+        // customize the context menu items
+        contextMenuItems: customContextMenuItems,
+        // customize the header and footer.
+        header: widget.header,
+        footer: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: () async {
+            // if the last one isn't a empty node, insert a new empty node.
+            await _focusOnLastEmptyParagraph();
+          },
+          child: SizedBox(
+            width: double.infinity,
+            height: UniversalPlatform.isDesktopOrWeb ? 200 : 400,
+          ),
+        ),
+        dropTargetStyle: AppFlowyDropTargetStyle(
+          color: Theme.of(context).colorScheme.primary.withOpacity(0.8),
+          margin: const EdgeInsets.only(left: 44),
+        ),
+      ),
+    );
+
+    if (isViewDeleted) {
+      return editor;
+    }
+
+    final editorState = widget.editorState;
+
+    if (UniversalPlatform.isMobile) {
+      return AppFlowyMobileToolbar(
+        toolbarHeight: 42.0,
+        editorState: editorState,
+        toolbarItemsBuilder: (sel) => buildMobileToolbarItems(editorState, sel),
+        child: MobileFloatingToolbar(
+          editorState: editorState,
+          editorScrollController: editorScrollController,
+          toolbarBuilder: (_, anchor, closeToolbar) =>
+              CustomMobileFloatingToolbar(
+            editorState: editorState,
+            anchor: anchor,
+            closeToolbar: closeToolbar,
+          ),
           child: editor,
         ),
+      );
+    }
+
+    return Center(
+      child: FloatingToolbar(
+        style: styleCustomizer.floatingToolbarStyleBuilder(),
+        items: toolbarItems,
+        editorState: editorState,
+        editorScrollController: editorScrollController,
+        textDirection: textDirection,
+        tooltipBuilder: (context, id, message, child) =>
+            widget.styleCustomizer.buildToolbarItemTooltip(
+          context,
+          id,
+          message,
+          child,
+        ),
+        child: editor,
       ),
     );
   }
 
-  Map<String, BlockComponentBuilder> _customAppFlowyBlockComponentBuilders() {
-    final standardActions = [
-      OptionAction.delete,
-      OptionAction.duplicate,
-      // OptionAction.divider,
-      // OptionAction.moveUp,
-      // OptionAction.moveDown,
-    ];
-
-    final calloutBGColor = AFThemeExtension.of(context).calloutBGColor;
-
-    final configuration = BlockComponentConfiguration(
-      padding: (_) => const EdgeInsets.symmetric(vertical: 5.0),
+  List<SelectionMenuItem> _customSlashMenuItems({
+    EditorState? editorState,
+    Node? node,
+  }) {
+    final documentBloc = context.read<DocumentBloc>();
+    final isLocalMode = documentBloc.isLocalMode;
+    return slashMenuItemsBuilder(
+      editorState: editorState,
+      node: node,
+      isLocalMode: isLocalMode,
+      documentBloc: documentBloc,
     );
-    final customBlockComponentBuilderMap = {
-      PageBlockKeys.type: PageBlockComponentBuilder(),
-      ParagraphBlockKeys.type: TextBlockComponentBuilder(
-        configuration: configuration,
-      ),
-      TodoListBlockKeys.type: TodoListBlockComponentBuilder(
-        configuration: configuration.copyWith(
-          placeholderText: (_) => 'To-do',
-        ),
-      ),
-      BulletedListBlockKeys.type: BulletedListBlockComponentBuilder(
-        configuration: configuration.copyWith(
-          placeholderText: (_) => 'List',
-        ),
-      ),
-      NumberedListBlockKeys.type: NumberedListBlockComponentBuilder(
-        configuration: configuration.copyWith(
-          placeholderText: (_) => 'List',
-        ),
-      ),
-      QuoteBlockKeys.type: QuoteBlockComponentBuilder(
-        configuration: configuration.copyWith(
-          placeholderText: (_) => 'Quote',
-        ),
-      ),
-      HeadingBlockKeys.type: HeadingBlockComponentBuilder(
-        configuration: configuration.copyWith(
-          padding: (_) => const EdgeInsets.only(top: 12.0, bottom: 4.0),
-          placeholderText: (node) =>
-              'Heading ${node.attributes[HeadingBlockKeys.level]}',
-        ),
-        textStyleBuilder: (level) => styleCustomizer.headingStyleBuilder(level),
-      ),
-      ImageBlockKeys.type: ImageBlockComponentBuilder(
-        configuration: configuration,
-        showMenu: true,
-        menuBuilder: (node, state) => Positioned(
-          top: 0,
-          right: 10,
-          child: ImageMenu(
-            node: node,
-            state: state,
-          ),
-        ),
-      ),
-      TableBlockKeys.type: TableBlockComponentBuilder(
-        menuBuilder: (node, editorState, position, dir, onBuild, onClose) =>
-            TableMenu(
-          node: node,
-          editorState: editorState,
-          position: position,
-          dir: dir,
-          onBuild: onBuild,
-          onClose: onClose,
-        ),
-      ),
-      TableCellBlockKeys.type: TableCellBlockComponentBuilder(
-        menuBuilder: (node, editorState, position, dir, onBuild, onClose) =>
-            TableMenu(
-          node: node,
-          editorState: editorState,
-          position: position,
-          dir: dir,
-          onBuild: onBuild,
-          onClose: onClose,
-        ),
-      ),
-      DatabaseBlockKeys.gridType: DatabaseViewBlockComponentBuilder(
-        configuration: configuration.copyWith(
-          padding: (_) => const EdgeInsets.symmetric(vertical: 10),
-        ),
-      ),
-      DatabaseBlockKeys.boardType: DatabaseViewBlockComponentBuilder(
-        configuration: configuration.copyWith(
-          padding: (_) => const EdgeInsets.symmetric(vertical: 10),
-        ),
-      ),
-      DatabaseBlockKeys.calendarType: DatabaseViewBlockComponentBuilder(
-        configuration: configuration.copyWith(
-          padding: (_) => const EdgeInsets.symmetric(vertical: 10),
-        ),
-      ),
-      CalloutBlockKeys.type: CalloutBlockComponentBuilder(
-        configuration: configuration,
-        defaultColor: calloutBGColor,
-      ),
-      DividerBlockKeys.type: DividerBlockComponentBuilder(
-        configuration: configuration,
-        height: 28.0,
-      ),
-      MathEquationBlockKeys.type: MathEquationBlockComponentBuilder(
-        configuration: configuration.copyWith(
-          padding: (_) => const EdgeInsets.symmetric(vertical: 20),
-        ),
-      ),
-      CodeBlockKeys.type: CodeBlockComponentBuilder(
-        configuration: configuration.copyWith(
-          textStyle: (_) => styleCustomizer.codeBlockStyleBuilder(),
-          placeholderTextStyle: (_) => styleCustomizer.codeBlockStyleBuilder(),
-        ),
-        padding: const EdgeInsets.only(
-          left: 30,
-          right: 30,
-          bottom: 36,
-        ),
-      ),
-      AutoCompletionBlockKeys.type: AutoCompletionBlockComponentBuilder(),
-      SmartEditBlockKeys.type: SmartEditBlockComponentBuilder(),
-      ToggleListBlockKeys.type: ToggleListBlockComponentBuilder(
-        configuration: configuration,
-      ),
-      OutlineBlockKeys.type: OutlineBlockComponentBuilder(
-        configuration: configuration.copyWith(
-          placeholderTextStyle: (_) =>
-              styleCustomizer.outlineBlockPlaceholderStyleBuilder(),
-        ),
-      ),
-    };
-
-    final builders = {
-      ...standardBlockComponentBuilderMap,
-      ...customBlockComponentBuilderMap,
-    };
-
-    // customize the action builder. actually, we can customize them in their own builder. Put them here just for convenience.
-    for (final entry in builders.entries) {
-      if (entry.key == PageBlockKeys.type) {
-        continue;
-      }
-      final builder = entry.value;
-
-      // customize the action builder.
-      final supportColorBuilderTypes = [
-        ParagraphBlockKeys.type,
-        HeadingBlockKeys.type,
-        BulletedListBlockKeys.type,
-        NumberedListBlockKeys.type,
-        QuoteBlockKeys.type,
-        TodoListBlockKeys.type,
-        CalloutBlockKeys.type,
-        OutlineBlockKeys.type,
-        ToggleListBlockKeys.type,
-      ];
-
-      final supportAlignBuilderType = [
-        ImageBlockKeys.type,
-      ];
-
-      final colorAction = [
-        OptionAction.divider,
-        OptionAction.color,
-      ];
-
-      final alignAction = [
-        OptionAction.divider,
-        OptionAction.align,
-      ];
-
-      final List<OptionAction> actions = [
-        ...standardActions,
-        if (supportColorBuilderTypes.contains(entry.key)) ...colorAction,
-        if (supportAlignBuilderType.contains(entry.key)) ...alignAction,
-      ];
-
-      builder.showActions =
-          (node) => node.parent?.type != TableCellBlockKeys.type;
-      builder.actionBuilder = (context, state) {
-        final top = builder.configuration.padding(context.node).top;
-        final padding = context.node.type == HeadingBlockKeys.type
-            ? EdgeInsets.only(top: top + 8.0)
-            : EdgeInsets.only(top: top + 2.0);
-        return Padding(
-          padding: padding,
-          child: BlockActionList(
-            blockComponentContext: context,
-            blockComponentState: state,
-            editorState: widget.editorState,
-            actions: actions,
-            showSlashMenu: () => showSlashMenu(widget.editorState),
-          ),
-        );
-      };
-    }
-
-    return builders;
-  }
-
-  List<SelectionMenuItem> _customSlashMenuItems() {
-    final items = [...standardSelectionMenuItems];
-    final imageItem = items.firstWhereOrNull(
-      (element) => element.name == AppFlowyEditorLocalizations.current.image,
-    );
-    if (imageItem != null) {
-      final imageItemIndex = items.indexOf(imageItem);
-      if (imageItemIndex != -1) {
-        items[imageItemIndex] = customImageMenuItem;
-      }
-    }
-    return [
-      ...items,
-      inlineGridMenuItem(documentBloc),
-      referencedGridMenuItem,
-      inlineBoardMenuItem(documentBloc),
-      referencedBoardMenuItem,
-      inlineCalendarMenuItem(documentBloc),
-      referencedCalendarMenuItem,
-      calloutItem,
-      outlineItem,
-      mathEquationItem,
-      codeBlockItem,
-      toggleListBlockItem,
-      emojiMenuItem,
-      autoGeneratorMenuItem,
-    ];
   }
 
   (bool, Selection?) _computeAutoFocusParameters() {
     if (widget.editorState.document.isEmpty) {
-      return (
-        true,
-        Selection.collapsed(
-          Position(path: [0], offset: 0),
-        ),
-      );
-    }
-    final nodes = widget.editorState.document.root.children
-        .where((element) => element.delta != null);
-    final isAllEmpty =
-        nodes.isNotEmpty && nodes.every((element) => element.delta!.isEmpty);
-    if (isAllEmpty) {
-      return (
-        true,
-        Selection.collapsed(
-          Position(path: nodes.first.path, offset: 0),
-        )
-      );
+      return (true, Selection.collapsed(Position(path: [0])));
     }
     return const (false, null);
   }
 
   Future<void> _initializeShortcuts() async {
-    //TODO(Xazin): Refactor lazy initialization
     defaultCommandShortcutEvents;
     final settingsShortcutService = SettingsShortcutService();
     final customizeShortcuts =
         await settingsShortcutService.getCustomizeShortcuts();
     await settingsShortcutService.updateCommandShortcuts(
-      standardCommandShortcutEvents,
+      commandShortcuts,
       customizeShortcuts,
     );
   }
+
+  void _setRTLToolbarItems(bool enableRtlToolbarItems) {
+    final textDirectionItemIds = textDirectionItems.map((e) => e.id);
+    // clear all the text direction items
+    toolbarItems.removeWhere((item) => textDirectionItemIds.contains(item.id));
+    // only show the rtl item when the layout direction is ltr.
+    if (enableRtlToolbarItems) {
+      toolbarItems.addAll(textDirectionItems);
+    }
+  }
+
+  List<CommandShortcutEvent> _buildFindAndReplaceCommands() {
+    return findAndReplaceCommands(
+      context: context,
+      style: FindReplaceStyle(
+        findMenuBuilder: (
+          context,
+          editorState,
+          localizations,
+          style,
+          showReplaceMenu,
+          onDismiss,
+        ) =>
+            Material(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: FindAndReplaceMenuWidget(
+              showReplaceMenu: showReplaceMenu,
+              editorState: editorState,
+              onDismiss: onDismiss,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _customizeBlockComponentBackgroundColorDecorator() {
+    blockComponentBackgroundColorDecorator = (Node node, String colorString) {
+      if (mounted && context.mounted) {
+        return buildEditorCustomizedColor(context, node, colorString);
+      }
+      return null;
+    };
+  }
+
+  void _initEditorL10n() => AppFlowyEditorL10n.current = EditorI18n();
+
+  Future<void> _focusOnLastEmptyParagraph() async {
+    final editorState = widget.editorState;
+    final root = editorState.document.root;
+    final lastNode = root.children.lastOrNull;
+    final transaction = editorState.transaction;
+    if (lastNode == null ||
+        lastNode.delta?.isEmpty == false ||
+        lastNode.type != ParagraphBlockKeys.type) {
+      transaction.insertNode([root.children.length], paragraphNode());
+      transaction.afterSelection = Selection.collapsed(
+        Position(path: [root.children.length]),
+      );
+    } else {
+      transaction.afterSelection = Selection.collapsed(
+        Position(path: lastNode.path),
+      );
+    }
+
+    transaction.customSelectionType = SelectionType.inline;
+    transaction.reason = SelectionUpdateReason.uiEvent;
+
+    await editorState.apply(transaction);
+  }
+
+  void _loseFocus() {
+    if (!widget.editorState.isDisposed) {
+      widget.editorState.selection = null;
+    }
+  }
+}
+
+Color? buildEditorCustomizedColor(
+  BuildContext context,
+  Node node,
+  String colorString,
+) {
+  if (!context.mounted) {
+    return null;
+  }
+
+  // the color string is from FlowyTint.
+  final tintColor = FlowyTint.values.firstWhereOrNull(
+    (e) => e.id == colorString,
+  );
+  if (tintColor != null) {
+    return tintColor.color(context);
+  }
+
+  final themeColor = themeBackgroundColors[colorString];
+  if (themeColor != null) {
+    return themeColor.color(context);
+  }
+
+  if (colorString == optionActionColorDefaultColor) {
+    final defaultColor = node.type == CalloutBlockKeys.type
+        ? AFThemeExtension.of(context).calloutBGColor
+        : Colors.transparent;
+    return defaultColor;
+  }
+
+  if (colorString == tableCellDefaultColor) {
+    return AFThemeExtension.of(context).tableCellBGColor;
+  }
+
+  try {
+    return colorString.tryToColor();
+  } catch (e) {
+    return null;
+  }
+}
+
+bool showInAnyTextType(EditorState editorState) {
+  final selection = editorState.selection;
+  if (selection == null) {
+    return false;
+  }
+
+  final nodes = editorState.getNodesInSelection(selection);
+  return nodes.any((node) => toolbarItemWhiteList.contains(node.type));
 }

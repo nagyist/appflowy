@@ -2,13 +2,15 @@ use std::str::FromStr;
 use std::sync::{Arc, Weak};
 
 use anyhow::Error;
+use arc_swap::ArcSwapOption;
 use chrono::{DateTime, Utc};
+use client_api::collab_sync::MsgId;
+use collab::core::collab::DataSource;
 use collab::preclude::merge_updates_v1;
+use collab_entity::CollabObject;
 use collab_plugins::cloud_storage::{
-  CollabObject, MsgId, RemoteCollabSnapshot, RemoteCollabState, RemoteCollabStorage,
-  RemoteUpdateReceiver,
+  RemoteCollabSnapshot, RemoteCollabState, RemoteCollabStorage, RemoteUpdateReceiver,
 };
-use parking_lot::Mutex;
 use tokio::task::spawn_blocking;
 
 use lib_infra::async_trait::async_trait;
@@ -26,7 +28,7 @@ use crate::AppFlowyEncryption;
 
 pub struct SupabaseCollabStorageImpl<T> {
   server: T,
-  rx: Mutex<Option<RemoteUpdateReceiver>>,
+  rx: ArcSwapOption<RemoteUpdateReceiver>,
   encryption: Weak<dyn AppFlowyEncryption>,
 }
 
@@ -38,7 +40,7 @@ impl<T> SupabaseCollabStorageImpl<T> {
   ) -> Self {
     Self {
       server,
-      rx: Mutex::new(rx),
+      rx: ArcSwapOption::new(rx.map(Arc::new)),
       encryption,
     }
   }
@@ -60,19 +62,22 @@ where
     true
   }
 
-  async fn get_all_updates(&self, object: &CollabObject) -> Result<Vec<Vec<u8>>, Error> {
+  async fn get_doc_state(&self, object: &CollabObject) -> Result<DataSource, Error> {
     let postgrest = self.server.try_get_weak_postgrest()?;
-    let action =
-      FetchObjectUpdateAction::new(object.object_id.clone(), object.ty.clone(), postgrest);
-    let updates = action.run().await?;
-    Ok(updates)
+    let action = FetchObjectUpdateAction::new(
+      object.object_id.clone(),
+      object.collab_type.clone(),
+      postgrest,
+    );
+    let doc_state = action.run().await?;
+    Ok(DataSource::DocStateV1(doc_state))
   }
 
   async fn get_snapshots(&self, object_id: &str, limit: usize) -> Vec<RemoteCollabSnapshot> {
     match self.server.try_get_postgrest() {
-      Ok(postgrest) => match get_snapshots_from_server(object_id, postgrest, limit).await {
-        Ok(snapshots) => snapshots,
-        Err(err) => {
+      Ok(postgrest) => get_snapshots_from_server(object_id, postgrest, limit)
+        .await
+        .unwrap_or_else(|err| {
           tracing::error!(
             "🔴fetch snapshots by oid:{} with limit: {} failed: {:?}",
             object_id,
@@ -80,8 +85,7 @@ where
             err
           );
           vec![]
-        },
-      },
+        }),
       Err(err) => {
         tracing::error!("🔴get postgrest failed: {:?}", err);
         vec![]
@@ -140,10 +144,14 @@ where
     update: Vec<u8>,
   ) -> Result<(), Error> {
     if let Some(postgrest) = self.server.get_postgrest() {
-      let workspace_id = object.get_workspace_id().ok_or(anyhow::anyhow!(
-        "Can't get the workspace id in CollabObject"
-      ))?;
-      send_update(workspace_id, object, update, &postgrest, &self.secret()).await?;
+      send_update(
+        object.workspace_id.clone(),
+        object,
+        update,
+        &postgrest,
+        &self.secret(),
+      )
+      .await?;
     }
 
     Ok(())
@@ -156,16 +164,14 @@ where
     init_update: Vec<u8>,
   ) -> Result<(), Error> {
     let postgrest = self.server.try_get_postgrest()?;
-    let workspace_id = object
-      .get_workspace_id()
-      .ok_or(anyhow::anyhow!("Invalid workspace id"))?;
 
-    let update_items = get_updates_from_server(&object.object_id, &object.ty, &postgrest).await?;
+    let update_items =
+      get_updates_from_server(&object.object_id, &object.collab_type, &postgrest).await?;
 
     // If the update_items is empty, we can send the init_update directly
     if update_items.is_empty() {
       send_update(
-        workspace_id,
+        object.workspace_id.clone(),
         object,
         init_update,
         &postgrest,
@@ -180,11 +186,14 @@ where
   }
 
   fn subscribe_remote_updates(&self, _object: &CollabObject) -> Option<RemoteUpdateReceiver> {
-    let rx = self.rx.lock().take();
-    if rx.is_none() {
-      tracing::warn!("The receiver is already taken");
+    let rx = self.rx.swap(None);
+    match rx {
+      Some(rx) => Arc::into_inner(rx),
+      None => {
+        tracing::warn!("The receiver is already taken");
+        None
+      },
     }
-    rx
   }
 }
 
@@ -197,18 +206,13 @@ pub(crate) async fn flush_collab_with_update(
 ) -> Result<(), Error> {
   // 2.Merge the updates into one and then delete the merged updates
   let merge_result = spawn_blocking(move || merge_updates(update_items, update)).await??;
-
-  let workspace_id = object
-    .get_workspace_id()
-    .ok_or(anyhow::anyhow!("Invalid workspace id"))?;
-
   let value_size = merge_result.new_update.len() as i32;
   let md5 = md5(&merge_result.new_update);
 
   tracing::trace!(
     "Flush collab id:{} type:{} is_encrypt: {}",
     object.object_id,
-    object.ty,
+    object.collab_type,
     secret.is_some()
   );
   let (new_update, encrypt) =
@@ -219,11 +223,11 @@ pub(crate) async fn flush_collab_with_update(
     .insert("encrypt", encrypt)
     .insert("md5", md5)
     .insert("value_size", value_size)
-    .insert("partition_key", partition_key(&object.ty))
+    .insert("partition_key", partition_key(&object.collab_type))
     .insert("uid", object.uid)
-    .insert("workspace_id", workspace_id)
+    .insert("workspace_id", &object.workspace_id)
     .insert("removed_keys", merge_result.merged_keys)
-    .insert("did", object.get_device_id())
+    .insert("did", &object.device_id)
     .build();
 
   postgrest
@@ -247,13 +251,13 @@ pub(crate) async fn send_update(
   let (update, encrypt) = SupabaseBinaryColumnEncoder::encode(update, encryption_secret)?;
   let builder = InsertParamsBuilder::new()
     .insert("oid", object.object_id.clone())
-    .insert("partition_key", partition_key(&object.ty))
+    .insert("partition_key", partition_key(&object.collab_type))
     .insert("value", update)
     .insert("encrypt", encrypt)
     .insert("uid", object.uid)
     .insert("md5", md5)
     .insert("workspace_id", workspace_id)
-    .insert("did", object.get_device_id())
+    .insert("did", &object.device_id)
     .insert("value_size", value_size);
 
   let params = builder.build();
@@ -277,12 +281,8 @@ fn merge_updates(update_items: Vec<UpdateItem>, new_update: Vec<u8>) -> Result<M
   if !new_update.is_empty() {
     updates.push(new_update);
   }
-  let updates = updates
-    .iter()
-    .map(|update| update.as_ref())
-    .collect::<Vec<&[u8]>>();
 
-  let new_update = merge_updates_v1(&updates)?;
+  let new_update = merge_updates_v1(updates)?;
   Ok(MergeResult {
     merged_keys,
     new_update,

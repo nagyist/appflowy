@@ -3,13 +3,14 @@ import 'package:appflowy/generated/locale_keys.g.dart';
 import 'package:appflowy/plugins/document/presentation/editor_plugins/extensions/flowy_tint_extension.dart';
 import 'package:appflowy/workspace/presentation/widgets/pop_up_action.dart';
 import 'package:appflowy_editor/appflowy_editor.dart';
-import 'package:appflowy_popover/appflowy_popover.dart';
 import 'package:collection/collection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flowy_infra/theme_extension.dart';
 import 'package:flowy_infra_ui/flowy_infra_ui.dart';
 import 'package:flowy_infra_ui/style_widget/extension.dart';
 import 'package:flutter/material.dart';
+
+const tableCellDefaultColor = 'appflowy_table_cell_default_color';
 
 enum TableOptionAction {
   addAfter,
@@ -112,19 +113,21 @@ class TableColorOptionAction extends PopoverActionCell {
             ? TableCellBlockKeys.colBackgroundColor
             : TableCellBlockKeys.rowBackgroundColor;
         final bgColor = cell?.attributes[key] as String?;
-        final selectedColor = bgColor?.toColor();
+        final selectedColor = bgColor?.tryToColor();
         // get default background color from themeExtension
         final defaultColor = AFThemeExtension.of(context).tableCellBGColor;
         final colors = [
           // reset to default background color
           FlowyColorOption(
             color: defaultColor,
-            name: LocaleKeys.document_plugins_optionAction_defaultColor.tr(),
+            i18n: LocaleKeys.document_plugins_optionAction_defaultColor.tr(),
+            id: tableCellDefaultColor,
           ),
           ...FlowyTint.values.map(
             (e) => FlowyColorOption(
               color: e.color(context),
-              name: e.tintName(AppFlowyEditorLocalizations.current),
+              i18n: e.tintName(AppFlowyEditorL10n.current),
+              id: e.id,
             ),
           ),
         ];
@@ -133,11 +136,11 @@ class TableColorOptionAction extends PopoverActionCell {
           colors: colors,
           selected: selectedColor,
           border: Border.all(
-            color: Theme.of(context).colorScheme.onBackground,
-            width: 1,
+            color: AFThemeExtension.of(context).onBackground,
           ),
-          onTap: (color, index) async {
-            final backgroundColor = selectedColor != color ? color.toHex() : "";
+          onTap: (option, index) async {
+            final backgroundColor =
+                selectedColor != option.color ? option.id : '';
             TableActions.setBgColor(
               node,
               position,

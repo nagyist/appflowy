@@ -1,3 +1,4 @@
+import 'package:flowy_infra/colorscheme/default_colorscheme.dart';
 import 'package:flutter/material.dart';
 
 import 'colorscheme.dart';
@@ -61,10 +62,12 @@ class LavenderColorScheme extends FlowyColorScheme {
           topbarBg: _white,
           icon: _lightShader1,
           text: _lightShader1,
+          secondaryText: _lightShader1,
+          strongText: Colors.black,
           input: _white,
           hint: _lightShader3,
           primary: _lightMain1,
-          onPrimary: _white,
+          onPrimary: _lightShader1,
           hoverBG1: _lightBg2,
           hoverBG2: _lightHover,
           hoverBG3: _lightShader6,
@@ -73,13 +76,19 @@ class LavenderColorScheme extends FlowyColorScheme {
           progressBarBGColor: _lightTint9,
           toolbarColor: _lightShader1,
           toggleButtonBGColor: _lightSelector,
+          calendarWeekendBGColor: const Color(0xFFFBFBFC),
+          gridRowCountColor: _black,
+          borderColor: ColorSchemeConstants.lightBorderColor,
+          scrollbarColor: const Color(0x3F171717),
+          scrollbarHoverColor: const Color(0x7F171717),
+          lightIconColor: const Color(0xFF8F959E),
         );
 
   const LavenderColorScheme.dark()
       : super(
           surface: const Color(0xFF1B1A1D),
           hover: _darkMain1,
-          selector: const Color(0xff333333),
+          selector: _darkShader2,
           red: const Color(0xfffb006d),
           yellow: const Color(0xffffd667),
           green: const Color(0xff66cf80),
@@ -105,12 +114,14 @@ class LavenderColorScheme extends FlowyColorScheme {
           tint9: const Color(0x4d0029FF),
           main1: _darkMain1,
           main2: _darkMain1,
-          shadow: _black,
+          shadow: const Color(0xff0F131C),
           sidebarBg: const Color(0xff2D223B),
           divider: _darkShader3,
           topbarBg: _darkShader1,
           icon: _darkShader5,
           text: _darkShader5,
+          secondaryText: _darkShader5,
+          strongText: Colors.white,
           input: _darkInput,
           hint: _darkShader5,
           primary: _darkMain1,
@@ -123,5 +134,11 @@ class LavenderColorScheme extends FlowyColorScheme {
           progressBarBGColor: _darkShader3,
           toolbarColor: _darkInput,
           toggleButtonBGColor: _darkShader1,
+          calendarWeekendBGColor: const Color(0xff121212),
+          gridRowCountColor: _darkMain1,
+          borderColor: ColorSchemeConstants.darkBorderColor,
+          scrollbarColor: const Color(0x40FFFFFF),
+          scrollbarHoverColor: const Color(0x80FFFFFF),
+          lightIconColor: const Color(0xFF8F959E),
         );
 }

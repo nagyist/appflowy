@@ -5,24 +5,26 @@ import 'package:flutter/material.dart';
 class FlowyColorOption {
   const FlowyColorOption({
     required this.color,
-    required this.name,
+    required this.i18n,
+    required this.id,
   });
 
   final Color color;
-  final String name;
+  final String i18n;
+  final String id;
 }
 
 class FlowyColorPicker extends StatelessWidget {
   final List<FlowyColorOption> colors;
   final Color? selected;
-  final Function(Color color, int index)? onTap;
+  final Function(FlowyColorOption option, int index)? onTap;
   final double separatorSize;
   final double iconSize;
   final double itemHeight;
   final Border? border;
 
   const FlowyColorPicker({
-    Key? key,
+    super.key,
     required this.colors,
     this.selected,
     this.onTap,
@@ -30,13 +32,12 @@ class FlowyColorPicker extends StatelessWidget {
     this.iconSize = 16,
     this.itemHeight = 32,
     this.border,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
     return ListView.separated(
       shrinkWrap: true,
-      controller: ScrollController(),
       separatorBuilder: (context, index) {
         return VSpace(separatorSize);
       },
@@ -57,26 +58,48 @@ class FlowyColorPicker extends StatelessWidget {
       checkmark = const FlowySvg(FlowySvgData("grid/checkmark"));
     }
 
-    final colorIcon = SizedBox.square(
-      dimension: iconSize,
-      child: Container(
-        decoration: BoxDecoration(
-          color: option.color,
-          shape: BoxShape.circle,
-          // border: border,
-        ),
-      ),
+    final colorIcon = ColorOptionIcon(
+      color: option.color,
+      iconSize: iconSize,
     );
 
     return SizedBox(
       height: itemHeight,
       child: FlowyButton(
-        text: FlowyText.medium(option.name),
+        text: FlowyText(option.i18n),
         leftIcon: colorIcon,
         rightIcon: checkmark,
+        iconPadding: 10,
         onTap: () {
-          onTap?.call(option.color, i);
+          onTap?.call(option, i);
         },
+      ),
+    );
+  }
+}
+
+class ColorOptionIcon extends StatelessWidget {
+  const ColorOptionIcon({
+    super.key,
+    required this.color,
+    this.iconSize = 16.0,
+  });
+
+  final Color color;
+  final double iconSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: iconSize,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: color == Colors.transparent
+              ? Border.all(color: const Color(0xFFCFD3D9))
+              : null,
+        ),
       ),
     );
   }

@@ -1,10 +1,10 @@
 use anyhow::Error;
-use collab_plugins::cloud_storage::CollabType;
+use collab_entity::CollabType;
 use tokio::sync::oneshot::channel;
 
-use flowy_database_deps::cloud::{
-  CollabObjectUpdate, CollabObjectUpdateByOid, DatabaseCloudService, DatabaseSnapshot,
-};
+use flowy_database_pub::cloud::{CollabDocStateByOid, DatabaseCloudService, DatabaseSnapshot};
+
+use lib_infra::async_trait::async_trait;
 use lib_infra::future::FutureResult;
 
 use crate::supabase::api::request::{
@@ -22,15 +22,17 @@ impl<T> SupabaseDatabaseServiceImpl<T> {
   }
 }
 
+#[async_trait]
 impl<T> DatabaseCloudService for SupabaseDatabaseServiceImpl<T>
 where
   T: SupabaseServerService,
 {
-  fn get_collab_update(
+  fn get_database_object_doc_state(
     &self,
     object_id: &str,
-    object_ty: CollabType,
-  ) -> FutureResult<CollabObjectUpdate, Error> {
+    collab_type: CollabType,
+    _workspace_id: &str,
+  ) -> FutureResult<Option<Vec<u8>>, Error> {
     let try_get_postgrest = self.server.try_get_weak_postgrest();
     let object_id = object_id.to_string();
     let (tx, rx) = channel();
@@ -38,10 +40,10 @@ where
       tx.send(
         async move {
           let postgrest = try_get_postgrest?;
-          let updates = FetchObjectUpdateAction::new(object_id.to_string(), object_ty, postgrest)
+          let updates = FetchObjectUpdateAction::new(object_id.to_string(), collab_type, postgrest)
             .run_with_fix_interval(5, 10)
             .await?;
-          Ok(updates)
+          Ok(Some(updates))
         }
         .await,
       )
@@ -49,11 +51,12 @@ where
     FutureResult::new(async { rx.await? })
   }
 
-  fn batch_get_collab_updates(
+  fn batch_get_database_object_doc_state(
     &self,
     object_ids: Vec<String>,
     object_ty: CollabType,
-  ) -> FutureResult<CollabObjectUpdateByOid, Error> {
+    _workspace_id: &str,
+  ) -> FutureResult<CollabDocStateByOid, Error> {
     let try_get_postgrest = self.server.try_get_weak_postgrest();
     let (tx, rx) = channel();
     tokio::spawn(async move {
@@ -70,7 +73,7 @@ where
     FutureResult::new(async { rx.await? })
   }
 
-  fn get_collab_snapshots(
+  fn get_database_collab_object_snapshots(
     &self,
     object_id: &str,
     limit: usize,

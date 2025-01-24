@@ -1,10 +1,5 @@
 {
   "type": "page",
-  "data": {
-    "delta": [
-      {"insert": ""}
-    ]
-  },
   "children": [
     {
       "type": "heading",
@@ -193,7 +188,6 @@
     {
       "type": "callout",
       "data": {
-        "bgColor": "#F0F0F0",
         "delta": [
           { "insert": "\nLike AppFlowy? Follow us:\n" },
           {
