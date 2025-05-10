@@ -48,6 +48,7 @@
     "createAccount": "Create account",
     "repeatPasswordEmptyError": "Repeat password can't be empty",
     "unmatchedPasswordError": "Repeat password is not the same as password",
+    "passwordMustContain": "Password must contain at least one letter, one number, and one symbol.",
     "syncPromptMessage": "Syncing the data might take a while. Please don't close this page",
     "or": "or",
     "signInWithGoogle": "Continue with Google",
@@ -560,6 +561,9 @@
       "selectHomePage": "Select a page",
       "clearHomePage": "Clear the home page for this namespace",
       "customUrl": "Custom URL",
+      "homePage": {
+        "upgradeToPro": "Upgrade to Pro Plan to set a homepage"
+      },
       "namespace": {
         "description": "This change will apply to all the published pages live on this namespace",
         "tooltip": "We reserve the rights to remove any inappropriate namespaces",
@@ -888,6 +892,7 @@
         "loginToEnableAIFeature": "AI features are only enabled after logging in with @:appName Cloud. If you don't have an @:appName account, go to 'My Account' to sign up",
         "llmModel": "Language Model",
         "globalLLMModel": "Global Language Model",
+        "readOnlyField": "This field is read-only",
         "llmModelType": "Language Model Type",
         "downloadLLMPrompt": "Download {}",
         "downloadAppFlowyOfflineAI": "Downloading AI offline package will enable AI to run on your device. Do you want to continue?",
@@ -3325,13 +3330,18 @@
       "browsePrompts": "Browse prompts",
       "usePrompt": "Use prompt",
       "featured": "Featured",
+      "custom": "Custom",
+      "loadDatabasePrompts": "Custom prompts from your database",
+      "loadDatabasePromptsFrom": "Load custom prompts from...",
+      "selectDatabase": "Select database",
+      "loading": "Loading...",
+      "invalidDatabase": "Failed to load custom prompts from database",
       "all": "All",
       "development": "Development",
       "writing": "Writing",
       "healthAndFitness": "Health & fitness",
       "business": "Business",
       "marketing": "Marketing",
-      "learning": "Learning",
       "travel": "Travel",
       "others": "Other",
       "prompt": "Prompt",
@@ -3346,7 +3356,12 @@
       "socialMedia": "Social Media",
       "strategy": "Strategy",
       "caseStudies": "Case Studies",
-      "salesCopy": "Sales Copy"
+      "salesCopy": "Sales Copy",
+      "education": "Education",
+      "work": "Work",
+      "podcastProduction": "Podcast Production",
+      "copyWriting": "Copy Writing",
+      "customerSuccess": "Customer Success"
     }
   },
   "autoUpdate": {
