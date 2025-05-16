@@ -30,6 +30,7 @@ class AFTextField extends StatefulWidget {
     this.suffixIconConstraints,
     this.size = AFTextFieldSize.l,
     this.groupId = EditableText,
+    this.focusNode,
   });
 
   /// The hint text to display when the text field is empty.
@@ -65,7 +66,7 @@ class AFTextField extends StatefulWidget {
   final bool obscureText;
 
   /// The trailing widget to display.
-  final Widget Function(BuildContext context, bool isObscured)?
+  final Widget? Function(BuildContext context, bool isObscured)?
       suffixIconBuilder;
 
   /// The size of the suffix icon.
@@ -73,6 +74,9 @@ class AFTextField extends StatefulWidget {
 
   /// The group ID for the text field.
   final Object groupId;
+
+  /// The focus node for the text field.
+  final FocusNode? focusNode;
 
   @override
   State<AFTextField> createState() => _AFTextFieldState();
@@ -119,10 +123,11 @@ class _AFTextFieldState extends AFTextFieldState {
     final contentPadding = widget.size.contentPadding(theme);
 
     final errorBorderColor = theme.borderColorScheme.errorThick;
-    final defaultBorderColor = theme.borderColorScheme.greyTertiary;
+    final defaultBorderColor = theme.borderColorScheme.primary;
 
     Widget child = TextField(
       groupId: widget.groupId,
+      focusNode: widget.focusNode,
       controller: effectiveController,
       keyboardType: widget.keyboardType,
       style: theme.textStyle.body.standard(
@@ -172,7 +177,7 @@ class _AFTextFieldState extends AFTextFieldState {
           ),
           borderRadius: borderRadius,
         ),
-        hoverColor: theme.borderColorScheme.greyTertiaryHover,
+        hoverColor: theme.borderColorScheme.primaryHover,
         suffixIcon: widget.suffixIconBuilder?.call(context, isObscured),
         suffixIconConstraints: widget.suffixIconConstraints,
       ),

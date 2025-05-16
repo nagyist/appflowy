@@ -70,15 +70,26 @@ class _SettingItemWidget extends StatelessWidget {
         const VSpace(4),
         SizedBox(
           height: 32,
-          child: FlowyTextField(
-            autoFocus: false,
-            hintText: item.hintText,
-            text: item.content,
-            onChanged: (content) {
-              context.read<OllamaSettingBloc>().add(
-                    OllamaSettingEvent.onEdit(content, item.settingType),
-                  );
-            },
+          child: FlowyTooltip(
+            message: item.editable
+                ? null
+                : LocaleKeys.settings_aiPage_keys_readOnlyField.tr(),
+            child: FlowyTextField(
+              autoFocus: false,
+              hintText: item.hintText,
+              text: item.content,
+              readOnly: !item.editable,
+              onChanged: item.editable
+                  ? (content) {
+                      context.read<OllamaSettingBloc>().add(
+                            OllamaSettingEvent.onEdit(
+                              content,
+                              item.settingType,
+                            ),
+                          );
+                    }
+                  : null,
+            ),
           ),
         ),
       ],
@@ -154,6 +165,7 @@ class LocalAIModelSelection extends StatelessWidget {
               height: 40,
               child: SettingsDropdown<AIModelPB>(
                 key: const Key('_AIModelSelection'),
+                textStyle: Theme.of(context).textTheme.bodySmall,
                 onChanged: (model) => context
                     .read<OllamaSettingBloc>()
                     .add(OllamaSettingEvent.setDefaultModel(model)),
