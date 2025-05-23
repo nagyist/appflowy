@@ -8,7 +8,9 @@ import 'package:appflowy/plugins/document/presentation/editor_plugins/ai/operati
 import 'package:appflowy/shared/list_extension.dart';
 import 'package:appflowy_backend/dispatch/dispatch.dart';
 import 'package:appflowy_backend/log.dart';
-import 'package:appflowy_backend/protobuf/flowy-ai/entities.pb.dart';
+import 'package:appflowy_backend/protobuf/flowy-ai/protobuf.dart'
+    hide CustomPromptDatabaseConfigurationPB;
+import 'package:appflowy_backend/protobuf/flowy-database2/protobuf.dart';
 import 'package:appflowy_result/appflowy_result.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:fixnum/fixnum.dart' as fixnum;
@@ -27,6 +29,7 @@ abstract class AIRepository {
     String? objectId,
     required String text,
     PredefinedFormat? format,
+    String? promptId,
     List<String> sourceIds = const [],
     List<AiWriterRecord> history = const [],
     required CompletionTypePB completionType,
@@ -41,17 +44,20 @@ abstract class AIRepository {
 
   Future<List<AiPrompt>> getBuiltInPrompts();
 
+  Future<List<AiPrompt>?> getDatabasePrompts(
+    CustomPromptDatabaseConfigPB config,
+  );
+
   void updateFavoritePrompts(List<String> promptIds);
 }
 
 class AppFlowyAIService implements AIRepository {
-  final List<AiPrompt> _builtInPrompts = [];
-
   @override
   Future<(String, CompletionStream)?> streamCompletion({
     String? objectId,
     required String text,
     PredefinedFormat? format,
+    String? promptId,
     List<String> sourceIds = const [],
     List<AiWriterRecord> history = const [],
     required CompletionTypePB completionType,
@@ -78,6 +84,7 @@ class AppFlowyAIService implements AIRepository {
       text: text,
       completionType: completionType,
       format: format?.toPB(),
+      promptId: promptId,
       streamPort: fixnum.Int64(stream.nativePort),
       objectId: objectId ?? '',
       ragIds: [
@@ -98,10 +105,6 @@ class AppFlowyAIService implements AIRepository {
 
   @override
   Future<List<AiPrompt>> getBuiltInPrompts() async {
-    if (_builtInPrompts.isNotEmpty) {
-      return _builtInPrompts;
-    }
-
     final prompts = <AiPrompt>[];
 
     try {
@@ -120,9 +123,21 @@ class AppFlowyAIService implements AIRepository {
       Log.error(e);
     }
 
-    _builtInPrompts.addAll(prompts);
-
     return prompts;
+  }
+
+  @override
+  Future<List<AiPrompt>?> getDatabasePrompts(
+    CustomPromptDatabaseConfigPB config,
+  ) async {
+    return DatabaseEventGetDatabaseCustomPrompts(config).send().fold(
+      (databasePromptsPB) =>
+          databasePromptsPB.items.map(AiPrompt.fromPB).toList(),
+      (err) {
+        Log.error(err);
+        return null;
+      },
+    );
   }
 
   @override

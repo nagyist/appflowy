@@ -10,7 +10,6 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:provider/provider.dart';
-import 'package:sentry_flutter/sentry_flutter.dart';
 
 import 'mobile_search_ask_ai_entrance.dart';
 import 'mobile_search_result.dart';
@@ -54,13 +53,6 @@ class MobileSearchScreen extends StatelessWidget {
           return const WorkspaceFailedScreen();
         }
 
-        Sentry.configureScope(
-          (scope) => scope.setUser(
-            SentryUser(
-              id: userProfile.id.toString(),
-            ),
-          ),
-        );
         return Provider.value(
           value: userProfile,
           child: MobileSearchPage(
@@ -105,39 +97,43 @@ class _MobileSearchPageState extends State<MobileSearchPage> {
       builder: (context, state) {
         return SafeArea(
           child: Scaffold(
-            body: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  MobileSearchTextfield(
-                    focusNode: focusNode,
-                    hintText: enableShowAISearch
-                        ? LocaleKeys.search_searchOrAskAI.tr()
-                        : LocaleKeys.search_label.tr(),
-                    query: state.query ?? '',
-                    onChanged: (value) =>
-                        context.read<CommandPaletteBloc>().add(
-                              CommandPaletteEvent.searchChanged(search: value),
-                            ),
-                  ),
-                  if (enableShowAISearch)
-                    MobileSearchAskAiEntrance(query: state.query),
-                  Flexible(
-                    child: NotificationListener(
-                      child: MobileSearchResult(),
-                      onNotification: (t) {
-                        if (t is ScrollUpdateNotification) {
-                          if (focusNode.hasFocus) {
-                            focusNode.unfocus();
-                          }
+            body: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                MobileSearchTextfield(
+                  focusNode: focusNode,
+                  hintText: enableShowAISearch
+                      ? LocaleKeys.search_searchOrAskAI.tr()
+                      : LocaleKeys.search_label.tr(),
+                  query: state.query ?? '',
+                  onChanged: (value) => context.read<CommandPaletteBloc>().add(
+                        CommandPaletteEvent.searchChanged(search: value),
+                      ),
+                ),
+                Flexible(
+                  child: NotificationListener(
+                    onNotification: (t) {
+                      if (t is ScrollUpdateNotification) {
+                        if (focusNode.hasFocus) {
+                          focusNode.unfocus();
                         }
-                        return true;
-                      },
+                      }
+                      return true;
+                    },
+                    child: SingleChildScrollView(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Column(
+                          children: [
+                            if (enableShowAISearch) MobileSearchAskAiEntrance(),
+                            MobileSearchResult(),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         );

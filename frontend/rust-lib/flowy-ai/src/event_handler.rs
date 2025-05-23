@@ -3,7 +3,7 @@ use crate::completion::AICompletion;
 use crate::entities::*;
 use flowy_ai_pub::cloud::{AIModel, ChatMessageType};
 use flowy_error::{ErrorCode, FlowyError, FlowyResult};
-use lib_dispatch::prelude::{data_result_ok, AFPluginData, AFPluginState, DataResult};
+use lib_dispatch::prelude::{AFPluginData, AFPluginState, DataResult, data_result_ok};
 use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -33,6 +33,7 @@ pub(crate) async fn stream_chat_message_handler(
     answer_stream_port,
     question_stream_port,
     format,
+    prompt_id,
   } = data;
 
   let message_type = match message_type {
@@ -48,6 +49,7 @@ pub(crate) async fn stream_chat_message_handler(
     answer_stream_port,
     question_stream_port,
     format,
+    prompt_id,
   };
 
   let ai_manager = upgrade_ai_manager(ai_manager)?;
@@ -98,6 +100,7 @@ pub(crate) async fn get_source_model_selection_handler(
   data_result_ok(models)
 }
 
+#[tracing::instrument(level = "debug", skip_all, err)]
 pub(crate) async fn update_selected_model_handler(
   data: AFPluginData<UpdateSelectedModelPB>,
   ai_manager: AFPluginState<Weak<AIManager>>,
@@ -312,7 +315,9 @@ pub(crate) async fn get_chat_settings_handler(
   let chat_id = data.try_into_inner()?.value;
   let chat_id = Uuid::from_str(&chat_id)?;
   let ai_manager = upgrade_ai_manager(ai_manager)?;
-  let rag_ids = ai_manager.get_rag_ids(&chat_id).await?;
+  let uid = ai_manager.user_service.user_id()?;
+  let mut conn = ai_manager.user_service.sqlite_connection(uid)?;
+  let rag_ids = ai_manager.get_rag_ids(&chat_id, &mut conn).await?;
   let pb = ChatSettingsPB { rag_ids };
   data_result_ok(pb)
 }
@@ -345,7 +350,7 @@ pub(crate) async fn get_local_ai_models_handler(
   ai_manager: AFPluginState<Weak<AIManager>>,
 ) -> DataResult<ModelSelectionPB, FlowyError> {
   let ai_manager = upgrade_ai_manager(ai_manager)?;
-  let data = ai_manager.get_local_available_models().await?;
+  let data = ai_manager.get_local_available_models(None).await?;
   data_result_ok(data)
 }
 
@@ -357,5 +362,38 @@ pub(crate) async fn update_local_ai_setting_handler(
   let data = data.try_into_inner()?;
   let ai_manager = upgrade_ai_manager(ai_manager)?;
   ai_manager.update_local_ai_setting(data.into()).await?;
+  Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all, err)]
+pub(crate) async fn get_custom_prompt_database_configuration_handler(
+  ai_manager: AFPluginState<Weak<AIManager>>,
+) -> DataResult<CustomPromptDatabaseConfigurationPB, FlowyError> {
+  let ai_manager = upgrade_ai_manager(ai_manager)?;
+  let configuration = ai_manager
+    .get_custom_prompt_database_configuration()
+    .await?
+    .ok_or_else(|| {
+      FlowyError::new(
+        ErrorCode::RecordNotFound,
+        "Custom prompt configuration not found",
+      )
+    })?;
+
+  data_result_ok(configuration)
+}
+
+#[tracing::instrument(level = "debug", skip_all, err)]
+pub(crate) async fn set_custom_prompt_database_configuration_handler(
+  data: AFPluginData<CustomPromptDatabaseConfigurationPB>,
+  ai_manager: AFPluginState<Weak<AIManager>>,
+) -> Result<(), FlowyError> {
+  let ai_manager = upgrade_ai_manager(ai_manager)?;
+  let config = data.into_inner();
+
+  ai_manager
+    .set_custom_prompt_database_configuration(config)
+    .await?;
+
   Ok(())
 }

@@ -1,8 +1,10 @@
 import 'package:appflowy/ai/ai.dart';
 import 'package:appflowy/plugins/ai_chat/application/chat_input_control_cubit.dart';
+import 'package:appflowy/plugins/ai_chat/application/chat_user_cubit.dart';
 import 'package:appflowy/plugins/ai_chat/presentation/layout_define.dart';
 import 'package:appflowy/startup/startup.dart';
 import 'package:appflowy/util/theme_extension.dart';
+import 'package:appflowy/workspace/application/command_palette/command_palette_bloc.dart';
 import 'package:appflowy_backend/protobuf/flowy-folder/protobuf.dart';
 import 'package:appflowy_ui/appflowy_ui.dart';
 import 'package:flowy_infra/file_picker/file_picker_service.dart';
@@ -12,6 +14,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'browse_prompts_button.dart';
+
+typedef OnPromptInputSubmitted = void Function(
+  String input,
+  PredefinedFormat? predefinedFormat,
+  Map<String, dynamic> metadata,
+  String? promptId,
+);
 
 class DesktopPromptInput extends StatefulWidget {
   const DesktopPromptInput({
@@ -30,8 +39,7 @@ class DesktopPromptInput extends StatefulWidget {
   final bool isStreaming;
   final AiPromptInputTextEditingController textController;
   final void Function() onStopStreaming;
-  final void Function(String, PredefinedFormat?, Map<String, dynamic>)
-      onSubmitted;
+  final OnPromptInputSubmitted onSubmitted;
   final ValueNotifier<List<String>> selectedSourcesNotifier;
   final void Function(List<String>) onUpdateSelectedSources;
   final bool hideDecoration;
@@ -47,6 +55,7 @@ class _DesktopPromptInputState extends State<DesktopPromptInput> {
   final layerLink = LayerLink();
   final overlayController = OverlayPortalController();
   final inputControlCubit = ChatInputControlCubit();
+  final chatUserCubit = ChatUserCubit();
   final focusNode = FocusNode();
 
   late SendButtonState sendButtonState;
@@ -74,6 +83,7 @@ class _DesktopPromptInputState extends State<DesktopPromptInput> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       focusNode.requestFocus();
+      checkForAskingAI();
     });
   }
 
@@ -88,13 +98,17 @@ class _DesktopPromptInputState extends State<DesktopPromptInput> {
     focusNode.dispose();
     widget.textController.removeListener(handleTextControllerChanged);
     inputControlCubit.close();
+    chatUserCubit.close();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider.value(
-      value: inputControlCubit,
+    return MultiBlocProvider(
+      providers: [
+        BlocProvider.value(value: inputControlCubit),
+        BlocProvider.value(value: chatUserCubit),
+      ],
       child: BlocListener<ChatInputControlCubit, ChatInputControlState>(
         listener: (context, state) {
           state.maybeWhen(
@@ -221,6 +235,28 @@ class _DesktopPromptInputState extends State<DesktopPromptInput> {
     );
   }
 
+  void checkForAskingAI() {
+    final paletteBloc = context.read<CommandPaletteBloc?>(),
+        paletteState = paletteBloc?.state;
+    if (paletteBloc == null || paletteState == null) return;
+    final isAskingAI = paletteState.askAI;
+    if (!isAskingAI) return;
+    paletteBloc.add(CommandPaletteEvent.askedAI());
+    final query = paletteState.query ?? '';
+    if (query.isEmpty) return;
+    final sources = (paletteState.askAISources ?? []).map((e) => e.id).toList();
+    final metadata =
+        context.read<AIPromptInputBloc?>()?.consumeMetadata() ?? {};
+    final promptBloc = context.read<AIPromptInputBloc?>();
+    final promptId = promptBloc?.promptId;
+    final promptState = promptBloc?.state;
+    final predefinedFormat = promptState?.predefinedFormat;
+    if (sources.isNotEmpty) {
+      widget.onUpdateSelectedSources(sources);
+    }
+    widget.onSubmitted.call(query, predefinedFormat, metadata, promptId ?? '');
+  }
+
   void startMentionPageFromButton() {
     if (overlayController.isShowing) {
       return;
@@ -280,6 +316,7 @@ class _DesktopPromptInputState extends State<DesktopPromptInput> {
       userInput,
       showPredefinedFormats ? predefinedFormat : null,
       metadata,
+      bloc.promptId,
     );
   }
 
@@ -498,9 +535,9 @@ class _DesktopPromptInputState extends State<DesktopPromptInput> {
 
   void handleOnSelectPrompt(AiPrompt prompt) {
     final bloc = context.read<AIPromptInputBloc>();
-    bloc.add(
-      AIPromptInputEvent.updateMentionedViews([]),
-    );
+    bloc
+      ..add(AIPromptInputEvent.updateMentionedViews([]))
+      ..add(AIPromptInputEvent.updatePromptId(prompt.id));
 
     final content = AiPromptInputTextEditingController.replace(prompt.content);
 
@@ -634,7 +671,9 @@ class _PromptBottomActions extends StatelessWidget {
 
               const Spacer(),
 
-              if (state.modelState.type == AiType.cloud) _selectSourcesButton(),
+              if (context.read<ChatUserCubit>().supportSelectSource())
+                _selectSourcesButton(),
+
               if (extraBottomActionButton != null) extraBottomActionButton!,
               // _mentionButton(context),
               if (state.supportChatWithFile) _attachmentButton(context),
